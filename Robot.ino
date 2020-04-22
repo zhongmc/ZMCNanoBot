@@ -17,7 +17,7 @@ void initRobot()
     v = 0;
     w = 0;
 
-    initRobot(0.0312,  0.1565, 990, 990, 19, 86);
+    initRobot(0.0312,  0.130, 990, 990, 10, 70);
 }
 
 
@@ -143,8 +143,38 @@ double vel_to_pwm(double vel)
     return 0;
   if( nvel > max_vel )
     nvel = max_vel;
-  double pwm = 13.0 * nvel + 24.0;
+  double pwm = 23.3 * nvel + 13.6;
   if (vel < 0)
     return -pwm;
   return pwm;
+}
+
+
+double pwm_to_ticks_l(double pwm, double dt)
+{
+  if (pwm == 0)
+    return 0;
+
+  double npwm = abs(pwm);
+  // double ticks = dt * (-0.0585 * npwm * npwm + 21.217 * npwm - 564.14);
+
+  double ticks = dt * (7.3927 * npwm - 117.23);
+  if (pwm > 0)
+    return ticks;
+  else
+    return -ticks;
+}
+
+double pwm_to_ticks_r(double pwm, double dt)
+{
+  if (pwm == 0)
+    return 0;
+
+  double npwm = abs(pwm);
+  // double ticks = dt * (-0.0707 * npwm * npwm + 23.943 * npwm - 709.5);
+  double ticks = dt * (5.9839 * npwm - 56.46);
+  if (pwm > 0)
+    return ticks;
+  else
+    return -ticks;
 }

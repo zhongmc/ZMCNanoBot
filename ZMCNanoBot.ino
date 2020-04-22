@@ -5,6 +5,9 @@
 #include "BlinkLed.h"
 #include "pitches.h"
 
+#define OP_VOLTAGE VOLT5
+
+void InitAdfMotor(uint8_t leftChannel, uint8_t rightChannel ); //channel 1-4
 
 extern double x,y,theta, v, w;
 
@@ -20,19 +23,28 @@ BlinkLed blinkLed;
 //BlinkMatrixLed blinkLed;
 bool mROSConnected = false;
 
+bool mBleConnected = false;
+
+
 int sampleTime = 30; // (sample time 30 ms);
-unsigned long prevSampleMillis;
+unsigned long prevSampleMillis, prevReportMillis;
 
 void setup()
 {
 
-  Wire.begin(); // set master mode, default on SDA/SCL for Ladybug   
-  Wire.setClock(400000); // I2C frequency at 400 kHz
-  delay(100);  
-  Serial.begin(115200);
-  delay(100);
+  // Wire.begin(); // set master mode, default on SDA/SCL for Ladybug   
+  // Wire.setClock(400000); // I2C frequency at 400 kHz
+  // delay(100);  
+  // Serial.begin(115200);
+  // delay(100);
 
+//HM10
+  // initNanoBle(115200);
+  
+//  ble nano
+  initNanoBle(115200);
   initMotor();
+  InitAdfMotor(1, 2);
   initRobot();
   initController();
   initCommands();
@@ -50,7 +62,7 @@ void setup()
   blinkLed.init();
   blinkLed.normalBlink();
 
-  Serial.println("READY!");
+  SendMessages("READY!\n");
 
   interrupts();
  
@@ -65,16 +77,20 @@ void setup()
   playMelody(melody, noteDurations, 8);
 
   #if OP_VOLTAGE == VOLT33
-    Serial.println("Work of 3.3V...");
+    SendMessages("Work of 3.3V...\n");
   #else
-    Serial.println("Work at 5V...");
+    SendMessages("Work of 5V...\n");
   #endif
 
   prevSampleMillis = millis();
+  prevReportMillis = prevSampleMillis;
 }
 
 void loop()
 {
+
+  doSendRemainedPkg();
+  
   checkCommands();
   // doBleHM10Loop();
   blinkLed.beSureToBlink();
@@ -86,28 +102,29 @@ void loop()
   if ( (millisNow - prevSampleMillis) >= sampleTime ) 
   {
       double dt = (double)(millisNow -  prevSampleMillis )/1000.0;
-       prevSampleMillis = millisNow;
+      prevSampleMillis = millisNow;
 
-      updateRobotState(readLeftEncoder(), readRightEncoder(), dt);
-
-      executeControl(v, theta, w, dt);      
-
-
-        if( mROSConnected )
-        {
-          Serial.print("RP");
-          Serial.print((int)(10000 * x));
-          Serial.print(',');
-          Serial.print((int)(10000 * y));
-          Serial.print(',');
-          Serial.print((int)(10000 * theta));
-          Serial.print(',');
-          Serial.print((int)(10000 * w));
-          Serial.print(',');
-          Serial.println((int)(10000 * v));
-        }
+      executeControl(dt);      
   }
 
+  if(  millisNow - prevReportMillis > 90 )
+  { 
+    prevReportMillis = millisNow;
+    if( mROSConnected || mBleConnected )
+    {
+    
+      SendRobotStateValue();
+
+      // SendMessages("RP%d,%d,%d,%d,%d,0;",
+      //   (int)(1000 * x),
+      //   (int)(1000 * y),
+      //   (int)(1000 * theta),
+      //   (int)(1000 * w),
+      //   (int)(1000 * v)
+      // );
+    }
+
+  }
 }
 
 

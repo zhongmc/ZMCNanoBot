@@ -1,37 +1,61 @@
 #include <Arduino.h>
 
-
+void MoveAdfMotor(int leftSpeed, int rightSpeed );   //0-255 ;
 extern bool mROSConnected;
 extern double d_kp, d_ki, d_kd, v_kp, v_ki, v_kd;
 extern volatile long count1, count2;
-static char comData[82];
+
+extern bool simulateMode;
+extern double left_ticks, right_ticks;
+extern long prev_left_ticks, prev_right_ticks;          
+
+
+char comData[82];
 int comDataCount = 0;
+
+uint8_t atNLCR = 0;
+
+//ble nano 30 hm10 10
+#define SEND_INTERVAL 30
+
+
+uint8_t queueLen = 0;
+bool queueIdle = true; 
+long lastPkgMillis;
+
 
 void initCommands()
 {
     comDataCount = 0;
+    queueIdle = true;
+    queueLen = 0;
+    atNLCR = 0;
+    lastPkgMillis = millis();
 }
 
 void checkCommands()
 {
 
   //read speed setting from serial
+  char ch;
   if (Serial.available())
   {
     while (Serial.available() > 0)
     {
-      char ch = Serial.read();
-      comData[comDataCount++] = ch;
+      ch = Serial.read();
       if (ch == ';' || ch == '\r' || ch == '\n') //new command
       {
+        comData[comDataCount] = 0;
         processCommand(comData, comDataCount);
         comDataCount = 0;
+        continue;
       }
+
+      comData[comDataCount++] = ch;
+      
       if (comDataCount > 80) //some error
       {
-        Serial.print("Err, CMD too long (>80)...");
-        // comData[comDataCount] = 0;
-        // Serial.println(comData);
+        SendMessages("CMD too long!");
         comDataCount = 0;
       }
     }
@@ -43,7 +67,7 @@ void checkCommands()
 void processCommand(char *buffer, int bufferLen)
 {
   *(buffer + bufferLen) = 0;
-  if (bufferLen <= 2)
+  if (bufferLen < 2)
   {
     if (buffer[0] == 'b') //get baundrate
       Serial.println(115200);
@@ -58,20 +82,19 @@ void processCommand(char *buffer, int bufferLen)
 
   if (ch0 == 'g' && ch1 == 'r')
   {
-    Serial.println("\r\n== OK ==");
+    SendMessages("== OK ==\r\n");
   }
   else if (ch0 == 's' && ch1 == 't') //stop
   {
-    // Serial.println("Stop!");
     stopRobot();
   }
 
   else if (ch0 == 'c' && ch1 == 'i') //count info
   {
-        Serial.print("CI:");
-        Serial.print(count1);
-        Serial.write(',');
-        Serial.println(count2);      
+    int c1,c2;
+    c1 = count1;
+    c2 = count2;
+    SendMessages("CI:%d,%d\n", c1, c2);
   }
 
   else if (ch0 == 'm' && ch1 == 'm') // move motor mmpwml,pwmr
@@ -83,14 +106,22 @@ void processCommand(char *buffer, int bufferLen)
     if (buf != NULL)
       pwmr = atoi(buf + 1);
 
+    MoveAdfMotor(pwml, pwmr);
     motorSpeed(pwml, pwmr);
     MoveMotor(0);
+    MoveAdfMotor(0, 0);
   }
 
   else if( ch0 == 'c' && ch1 == 'r') //ros connected
   {
-    Serial.println("\nROS Connected OK!");
+    SendMessages(" ROS Connected OK!\n");
     mROSConnected = true;
+  }
+
+  else if( ch0 == 'b' && ch1 == 'r') // ble connected
+  {
+    SendMessages(" BLE Connected OK! \n");
+    mBleConnected = true;
   }
 
   else if (ch0 == 'p' && ch1 == 'i') //set pid cmd: pi type kp,ki,kd;
@@ -109,10 +140,37 @@ void processCommand(char *buffer, int bufferLen)
 
     setDriveGoal(v, w);
   }
+
+  else if (ch0 == 's' && ch1 == 'm') //simulate mode //simulate mode sm0 sm1 sm2; 0: cancel simulate mode 1:simulate with the obstacle; 2: simulate with obstacle plus motor
+  {
+    int val = atoi(buffer + 2);
+    setSimulateMode( val );
+  }
+  else if( ch0 == 'a' && ch1 == 't' )
+  {
+    Serial.print( buffer );
+    if( atNLCR == 1 )
+      Serial.print( '\r' );
+    else if( atNLCR == 2 )
+      Serial.print( '\n');
+    else if( atNLCR == 3 )
+      Serial.print( "\r\n" );
+  }
+  else if( ch0 == 'l' && ch1 == 'r')
+  {
+    if( bufferLen == 2 )
+    {
+      Serial.print(" at NLCR mode:");
+      Serial.println( atNLCR );
+    }
+    else
+      atNLCR = (*(buffer+2) - '0');
+  }
+
   else
   {
-    Serial.print("Na,");
-    Serial.println(buffer );
+     Serial.print("Na:");
+     Serial.println(buffer );
   }
 }
 
@@ -131,22 +189,20 @@ void setPID(char *buffer)
   buf = strchr((buf + 1), ',');
   d = atof(buf + 1);
  
-  Serial.print("Set PID:");
-  Serial.print(type);
-  Serial.print(',');
-  Serial.print(p);
-  Serial.print(',');
-  Serial.print(i);
-  Serial.print(',');
-  Serial.println(d);
+  SendMessages("Set PID:%d,%d,%d,%d\n",
+    type, 
+    (int)100*p,
+    (int)1000*i,
+    (int)10000*d
+  );
 
-    if( type == 0 )
+    if( type == 1 )
     {
         d_kp = p;
         d_ki = i;
         d_kd = d;
     }
-    else if( type == 1)
+    else if( type == 4 )
     {
         v_kp = p;
         v_ki = i;
@@ -162,12 +218,6 @@ void motorSpeed(int pwml, int pwmr)
   MoveLeftMotor(pwml);
   MoveRightMotor(pwmr);
 
-  Serial.print(pwml);
-  Serial.print(',');
-  Serial.print(pwmr);
-  Serial.print(',');
-  // Serial.print(pwm);
-  // Serial.print(',');
   delay(500);
   c1 = count1;
   c2 = count2;
@@ -175,12 +225,229 @@ void motorSpeed(int pwml, int pwmr)
   delay(1000);
   lt = millis() - lt;
 
-  c1 = count1 - c1;
-  c2 = count2 - c2;
-  // log("%d,%d,%d\n", lt, c1, c2);
-  Serial.print(lt);
-  Serial.write(',');
-  Serial.print( c1 );
-  Serial.write(',');
-  Serial.println(c2);
+  int ic1 = (int) (count1 - c1);
+  int ic2 = (int) (count2 - c2);
+  int lt1 = (int)lt;
+  SendMessages("%d,%d,%d,%d\n", pwml, lt1, ic1, ic2);
+}
+
+
+
+void floatToByte(byte *arrayBuf, double val, double scale)
+{
+  int tmp = (int)(val * scale);
+  if (tmp > 0)
+  {
+    *arrayBuf = tmp & 0xff;
+    tmp = (tmp & 0xff00) / 256;
+    *(arrayBuf + 1) = tmp;
+  }
+  else
+  {
+    tmp = -tmp;
+    *arrayBuf = tmp & 0xff;
+    tmp = (tmp & 0xff00) / 256;
+    *(arrayBuf + 1) = tmp | 0x80;
+  }
+}
+
+
+void log(const char *format, ...)
+{
+  char tmp[500];
+  va_list vArgList;
+  va_start(vArgList, format);
+  // sniprintf(tmp, 490, format, vArgList);
+  vsprintf(tmp, format, vArgList);
+  va_end(vArgList);
+  Serial.print(tmp);
+}
+
+
+
+void SendRobotStateValue()
+{
+  //0xA1, 19, x*1000,y*1000,theta*1000, leftCoder, rightCoder
+  byte buf[20];
+  memset(buf, 0, 20);
+  buf[0] = 0xA1;  //A为二进制报文标志，0 为报文类型
+  buf[1] = 16;   //长度
+  double scale = 1000;
+  floatToByte(buf + 2, x, scale);
+  floatToByte(buf + 4, y, scale);
+  floatToByte(buf + 6, theta, scale);
+  // floatToByte(buf + 8, pos.theta, scale);
+  buf[8] = (int)(100.0 * v);
+  buf[9] = 51; //(byte)(int)(10.0 * 5); //voltage
+
+  long c1, c2;
+  c1 = count1;
+  c2 = count2;
+
+  memcpy(buf + 10, &c1, 4);
+  memcpy(buf + 14, &c2, 4);
+
+  if( queueIdle == true )
+  {
+    queueIdle = false;
+    for( int i=0; i<18; i++)
+    {
+      Serial.write(buf[i]);
+    }    
+    Serial.flush();
+    lastPkgMillis = millis();
+  }
+  else
+  {
+    addData(buf, 18);
+  }
+}
+
+//发送数据，（透传时，同时写入BLE）,需要按19（20）字节分包，默认第一个包直接发送，
+//剩下的发送到队列中
+
+
+void SendMessages(const char *format, ...)
+{
+  char tmp[60];
+  memset(tmp, 0, 60);
+  
+  va_list vArgList;
+  va_start(vArgList, format);
+  // vsniprintf(tmp, 20, format, vArgList);
+  vsnprintf(tmp, 59, format, vArgList);
+  va_end(vArgList);
+  int len = strlen(tmp);
+  if( !mBleConnected )  //return
+  {
+    for( int i=0; i<len; i++)
+    {
+      Serial.write((byte)*(tmp + i));
+    }    
+    Serial.flush();
+    return;
+  }
+
+/////////////
+  int ll;
+  if( queueIdle == true )
+  {
+    queueIdle = false;
+    if( len > 19 )
+      ll = 19;
+    else 
+      ll = len;
+
+    for( int i=0; i<ll; i++)
+    {
+      Serial.write((byte)*(tmp + i));
+    }    
+    Serial.flush();
+
+    lastPkgMillis = millis();
+
+  }
+  else
+  {
+     ll = 0;
+  }
+  //将数据写入队列，等待发送
+  while( ll < len )
+  {
+    uint8_t l = len - ll;
+    if( l > 19 )
+      l = 19;
+    addData((tmp + ll), l );
+    ll = ll + l; 
+  }
+  return;
+}
+
+void doSendRemainedPkg()
+{
+  if( millis() - lastPkgMillis < SEND_INTERVAL )
+  {
+    return;
+  }
+  if( isEmpty() )
+  {
+    queueIdle = true;
+    return;
+  }
+  queueIdle = false;
+  byte buf[20];
+  int len = pullData( buf );
+  if( len <= 0 )
+    return;
+  for (int i = 0; i < len; i++)
+  {
+    Serial.write( buf[i]);
+  }
+
+  Serial.flush();
+  lastPkgMillis = millis();
+}
+
+
+void setSimulateMode( int val )
+{
+
+    if( val == 0 )
+    {
+      Serial.println("Close simulate mode!");
+      prev_left_ticks = readLeftEncoder();
+      prev_right_ticks = readRightEncoder();          
+      simulateMode = false;
+    }
+    else
+    {
+
+      left_ticks = 0;
+      right_ticks = 0;
+      prev_left_ticks = 0;
+      prev_right_ticks = 0;          
+      simulateMode = true; 
+      Serial.println("Simulate mode!");
+    }
+
+}
+
+//BLE分包，待发送数据队列实现
+// uint8_t queueLen = 0;
+// bool queueIdle = true; 
+char dataBuf[4][20];
+uint8_t dataLens[4];
+
+int addData(char *buf, uint8_t len )
+{
+  if( queueLen > 3 )
+    return -1; //full
+
+  memset(dataBuf[queueLen], 0, 20);
+  memcpy( dataBuf[queueLen], buf, len );
+  dataLens[queueLen] = len;
+  queueLen++;
+  return queueLen;
+}
+
+int pullData(char *buf )
+{
+  
+    if( queueLen == 0 )
+      return -1; //empty
+    
+    uint8_t len = dataLens[0];
+    memcpy( buf, dataBuf[0], len );
+    for( int i=0; i<queueLen - 1; i++ )
+    {
+      dataLens[i] = dataLens[i+1];
+      memcpy(dataBuf[i], dataBuf[i+1], 20);
+    }
+    queueLen--;
+    return len;
+}
+
+bool isEmpty()
+{
+  return (queueLen == 0);
 }

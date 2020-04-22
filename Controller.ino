@@ -8,17 +8,18 @@ double lastError_v, lastErrorIntegration_v;
 
 double drive_v, drive_w; //driving velocity and turning w; 
 
-double ctrl_v, ctrl_w; //控制输出v, mW
+double ctrl_v, ctrl_w; //控制输出v, w
 double vel_l, vel_r; //控制输出的vel 
 
 double mTheta;  //目标方向
-double mW;      //转弯
 double curW;    //当前的转弯状态
 bool keepTheta; //是否需要保存当前方向
 int keepThetaTimer;
 long thetaPrevMillis;
 bool okToKeep;
 
+bool simulateMode = false;
+double left_ticks = 0, right_ticks = 0;
 
 void initController()
 {
@@ -35,7 +36,7 @@ void initController(double _dkp, double _dki, double _dkd, double _vkp, double _
     v_ki = _vki;
     v_kd = _vkd;
     mTheta = 0;
-    mW = 0;
+    curW = 0;
     drive_v = 0;
     drive_w = 0;
     
@@ -52,75 +53,99 @@ void initController(double _dkp, double _dki, double _dkd, double _vkp, double _
 //设定控制目标，速度、转弯
 void driveRobot(double _v, double _w, double curTheta )
 {
+  if( abs(_v) <= 0.0001)
+    _v = 0;
+  
+  if( abs(_w) <= 0.001 )
+    _w = 0;
 
-    if( abs(_v) <= 0.0001 && abs(_w) <= 0.001 )
-    {
-        drive_v = 0;
-        drive_w = 0;
-        StopMotor();
+  drive_v = _v;
+  drive_w = _w;
 
-        lastError_d = 0;
-        lastError_v = 0;
+  if( _v == 0 && _w == 0 )
+  {
+    if( curW != 0 )
+      mTheta = theta;
+    curW = 0;
+    StopMotor();
+    mTheta = theta;
+    lastError_d = 0;
+    lastError_v = 0;
 
-        lastErrorIntegration_d = 0;
-        lastErrorIntegration_v = 0;
+    lastErrorIntegration_d = 0;
+    lastErrorIntegration_v = 0;
 
-        return;
+    return;
 
-    }
+  }
 
   if (_w == 0 && curW != 0) //remain the current theta; 加速过程中会有晃动；保留初始角度？
   {
     keepTheta = true;
+    okToKeep = false;
     keepThetaTimer = 120;//(1 + 2 * abs(m_robot_w)) * 60;
     thetaPrevMillis = millis();
-    mTheta = curTheta; //转弯结束，保留当前角度
   }
-  curW = _w;
-  mW = _w;
 
-    drive_v = _v;
-    drive_w = _w;
+  curW = _w;
 
   if( drive_w != 0  && drive_v != 0 ) //转弯，控制速度？？
   {
-    drive_v = (0.1-abs(drive_v))/3.14 * abs(drive_w) + abs(drive_v);
+    drive_v = (0.09-abs(drive_v))/3.14 * abs(drive_w) + abs(drive_v);
     if( _v < 0 )
-      drive_w = -drive_w;
+      drive_v = -drive_v;
   }
 }
 
-//执行控制，v 当前速度， theta 当前角度， w 当前转弯角速度
-void executeControl( double _v, double _theta, double _w, double dt)
+void executeControl( double dt)
 {
-    if( drive_v == 0 && drive_w == 0 )
-        return;
 
-    executeDirControl(_v, _theta, _w, dt);
-    executeVelocityControl(_v, _theta, _w, dt);
+    if( simulateMode )
+      updateRobotState(left_ticks, right_ticks, dt);
+    else
+      updateRobotState(readLeftEncoder(), readRightEncoder(), dt);
+
+    if( drive_v == 0 && drive_w == 0 )
+    {
+        mTheta = theta;
+        return;
+    }
+    executeDirControl( dt );
+    executeVelocityControl( dt );
 
     double pwm_l, pwm_r;
     pwm_l = vel_to_pwm(vel_l);
     pwm_r = vel_to_pwm(vel_r);
 
-    MoveLeftMotor(pwm_l);
-    MoveRightMotor(pwm_r);
+    if( simulateMode )
+    {
+      left_ticks = left_ticks + pwm_to_ticks_l(pwm_l, dt);
+      right_ticks = right_ticks + pwm_to_ticks_r(pwm_r, dt);
+    }
+    else
+    {
+      MoveLeftMotor(pwm_l);
+      MoveRightMotor(pwm_r);
+
+      MoveAdfMotor(pwm_l, pwm_r);
+
+    }
 
 }
 
 
 //执行控制，v 当前速度， theta 当前角度， w 当前转弯角速度
-void executeDirControl( double _v, double _theta, double _w, double dt)
+void executeDirControl( double dt)
 {
 
-  if (mW != 0) //转弯，自由控制
+  if (drive_w != 0) //转弯，自由控制
   {
     ctrl_v = drive_v;
     ctrl_w = drive_w; 
     return;
   }
 
-  if (keepTheta)
+  if (keepTheta == true )
   {
     if (millis() - thetaPrevMillis > keepThetaTimer) //
     {
@@ -145,17 +170,17 @@ void executeDirControl( double _v, double _theta, double _w, double dt)
   }
 
   ctrl_v = drive_v;
-  double e = mTheta - _theta;
+  double e = mTheta - theta;
   e = atan2(sin(e), cos(e));
   double e_D = (e - lastError_d) / dt;
   double e_I = lastErrorIntegration_d + e * dt;
-  drive_w = d_kp * e + d_ki * e_I + d_kd * e_D;
+  ctrl_w = d_kp * e + d_ki * e_I + d_kd * e_D;
   lastErrorIntegration_d = e_I;
   lastError_d = e;    
 
 }
 
-void executeVelocityControl(double _v, double _theta, double _w, double dt)
+void executeVelocityControl( double dt)
 {
 
     double _min_vel = getMinVel();
@@ -197,7 +222,7 @@ void executeVelocityControl(double _v, double _theta, double _w, double dt)
   else
   {
       double e, ei,ed;
-      e = ctrl_v - _v;
+      e = ctrl_v - v;
       ei = lastErrorIntegration_v + e* dt;
       ed = (e-lastError_v)/dt;
 

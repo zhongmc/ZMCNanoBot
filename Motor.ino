@@ -28,14 +28,6 @@ volatile long count2 = 0;
 void initMotor()
 {
   Serial.println("init motor...");
-  // log("LEFT pwm: %d dir: %d wa:%d wb:%d;\n", LEFT_WHEEL_PWM, LEFT_WHEEL_DIR, LEFT_WHEEL_A, LEFT_WHEEL_B );
-  // log("RIGHT pwm: %d dir: %d wa:%d wb:%d;\n", RIGHT_WHEEL_PWM, RIGHT_WHEEL_DIR, RIGHT_WHEEL_A, RIGHT_WHEEL_B );
-  // Serial.print("dtoi(2):" );
-  // Serial.print("dtoi(3):" );
-
-  // Serial.println(digitalPinToInterrupt(RIGHT_WHEEL_A));
-  // Serial.println(digitalPinToInterrupt(LEFT_WHEEL_A));
-
 
   pinMode(LEFT_WHEEL_A, INPUT_PULLUP);
   pinMode(RIGHT_WHEEL_A, INPUT_PULLUP);
@@ -157,7 +149,7 @@ void MoveRightMotor(int PWM)
 void Code1()
 {
   int wheelDir = digitalRead(LEFT_WHEEL_B);
-  if (wheelDir == LOW)
+  if (wheelDir == HIGH)
     count1++;
   else
     count1--;
@@ -167,7 +159,7 @@ void Code1()
 void Code2()
 {
   int wheelDir = digitalRead(RIGHT_WHEEL_B);
-  if (wheelDir == HIGH) //HIGH)
+  if (wheelDir == LOW) //HIGH)
     count2++;
   else
     count2--;
