@@ -25,8 +25,9 @@ bool mROSConnected = false;
 
 bool mBleConnected = false;
 
+#define REPORT_TIME 150
+#define SAMPLE_TIME 50
 
-int sampleTime = 30; // (sample time 30 ms);
 unsigned long prevSampleMillis, prevReportMillis;
 
 void setup()
@@ -62,10 +63,12 @@ void setup()
   blinkLed.init();
   blinkLed.normalBlink();
 
-  SendMessages("READY!\n");
-
+  #if OP_VOLTAGE == VOLT33
+    SendMessages("Work of 3.3V...\n");
+  #else
+    SendMessages("Work of 5V...\n");
+  #endif
   interrupts();
- 
   // bCount = 0;
   int melody[] = {
         NOTE_C4, NOTE_G3,NOTE_G3, NOTE_A3, NOTE_G3,0, NOTE_B3, NOTE_C4
@@ -76,11 +79,10 @@ void setup()
 
   playMelody(melody, noteDurations, 8);
 
-  #if OP_VOLTAGE == VOLT33
-    SendMessages("Work of 3.3V...\n");
-  #else
-    SendMessages("Work of 5V...\n");
-  #endif
+  SendMessages("READY!\n");
+
+  mROSConnected = false;
+  mBleConnected = false;
 
   prevSampleMillis = millis();
   prevReportMillis = prevSampleMillis;
@@ -88,18 +90,15 @@ void setup()
 
 void loop()
 {
-
-  doSendRemainedPkg();
-  
-  checkCommands();
-  // doBleHM10Loop();
+ // doBleHM10Loop();
   blinkLed.beSureToBlink();
-  //ble cmd process
-  // processSetingsRequire();
+  doSendRemainedPkg();
+  checkCommands();
+
   unsigned long millisNow;
   millisNow = millis();
 
-  if ( (millisNow - prevSampleMillis) >= sampleTime ) 
+  if ( (millisNow - prevSampleMillis) >= SAMPLE_TIME ) 
   {
       double dt = (double)(millisNow -  prevSampleMillis )/1000.0;
       prevSampleMillis = millisNow;
@@ -107,7 +106,7 @@ void loop()
       executeControl(dt);      
   }
 
-  if(  millisNow - prevReportMillis > 90 )
+  if(  millisNow - prevReportMillis > 150 )
   { 
     prevReportMillis = millisNow;
     if( mROSConnected || mBleConnected )
@@ -125,23 +124,6 @@ void loop()
     }
 
   }
-}
-
-
-
-void stopRobot()
-{
-  blinkLed.normalBlink();
-  // CurieTimerOne.kill();
-  StopMotor();
-  delay(100);
-  updateRobotState(readLeftEncoder(), readRightEncoder(), 0.03); //处理当前运动的惯性
-}
-
-
-void setDriveGoal(double _v, double _w)
-{
-  driveRobot(_v, _w, theta);
 }
 
 

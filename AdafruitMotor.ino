@@ -10,7 +10,7 @@ void InitAdfMotor(uint8_t leftChannel, uint8_t rightChannel )
 
     leftMotor = AFMS.getMotor( leftChannel );
     rightMotor = AFMS.getMotor( rightChannel );
-    AFMS.begin(100); //AFMS.begin(50); //控制舵机时，需要50Hz的PWM信号；默认1.6Khz
+    AFMS.begin(); //AFMS.begin(50); //控制舵机时，需要50Hz的PWM信号；默认1.6Khz
 
 }
 

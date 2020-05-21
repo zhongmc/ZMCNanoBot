@@ -10,10 +10,8 @@ extern double left_ticks, right_ticks;
 extern long prev_left_ticks, prev_right_ticks;          
 
 
-char comData[82];
+char comData[52];
 int comDataCount = 0;
-
-uint8_t atNLCR = 0;
 
 //ble nano 30 hm10 10
 #define SEND_INTERVAL 30
@@ -29,7 +27,6 @@ void initCommands()
     comDataCount = 0;
     queueIdle = true;
     queueLen = 0;
-    atNLCR = 0;
     lastPkgMillis = millis();
 }
 
@@ -53,7 +50,7 @@ void checkCommands()
 
       comData[comDataCount++] = ch;
       
-      if (comDataCount > 80) //some error
+      if (comDataCount > 50) //some error
       {
         SendMessages("CMD too long!");
         comDataCount = 0;
@@ -83,21 +80,19 @@ void processCommand(char *buffer, int bufferLen)
   if (ch0 == 'g' && ch1 == 'r')
   {
     SendMessages("== OK ==\r\n");
-  }
-  else if (ch0 == 's' && ch1 == 't') //stop
-  {
-    stopRobot();
+    return;
   }
 
-  else if (ch0 == 'c' && ch1 == 'i') //count info
+  if (ch0 == 'c' && ch1 == 'i') //count info
   {
     int c1,c2;
     c1 = count1;
     c2 = count2;
-    SendMessages("CI:%d,%d\n", c1, c2);
+    SendMessages("-ci:%d,%d\n", c1, c2);
+    return;
   }
 
-  else if (ch0 == 'm' && ch1 == 'm') // move motor mmpwml,pwmr
+  if (ch0 == 'm' && ch1 == 'm') // move motor mmpwml,pwmr
   {
     int pwml = atoi(buffer + 2);
     char *buf = strchr((buffer + 2), ',');
@@ -106,30 +101,39 @@ void processCommand(char *buffer, int bufferLen)
     if (buf != NULL)
       pwmr = atoi(buf + 1);
 
-    MoveAdfMotor(pwml, pwmr);
+    if( !simulateMode )
+      MoveAdfMotor(pwml, pwmr);
+
     motorSpeed(pwml, pwmr);
     MoveMotor(0);
-    MoveAdfMotor(0, 0);
+
+    if( !simulateMode )
+      MoveAdfMotor(0, 0);
+
+    return;
   }
 
-  else if( ch0 == 'c' && ch1 == 'r') //ros connected
+  if( ch0 == 'c' && ch1 == 'r') //ros connected
   {
     SendMessages(" ROS Connected OK!\n");
     mROSConnected = true;
+    return;
   }
 
-  else if( ch0 == 'b' && ch1 == 'r') // ble connected
+  if( ch0 == 'b' && ch1 == 'r') // ble connected
   {
     SendMessages(" BLE Connected OK! \n");
     mBleConnected = true;
+    return;
   }
 
-  else if (ch0 == 'p' && ch1 == 'i') //set pid cmd: pi type kp,ki,kd;
+  if (ch0 == 'p' && ch1 == 'i') //set pid cmd: pi type kp,ki,kd;
   {
     setPID(buffer + 2);
+    return;
   }
 
-  else if (ch0 == 's' && ch1 == 'd') //set drive Goal
+  if (ch0 == 's' && ch1 == 'd') //set drive Goal
   {
     double v, w = 0;
 
@@ -137,41 +141,90 @@ void processCommand(char *buffer, int bufferLen)
     char *buf = strchr(buffer, ',');
     if (buf != NULL)
       w = atof(buf + 1);
-
+    // Serial.print("_sd");
+    // Serial.print(v);
+    // Serial.print(',');
+    // Serial.println(w);
     setDriveGoal(v, w);
+    return;
   }
 
-  else if (ch0 == 's' && ch1 == 'm') //simulate mode //simulate mode sm0 sm1 sm2; 0: cancel simulate mode 1:simulate with the obstacle; 2: simulate with obstacle plus motor
+  if (ch0 == 's' && ch1 == 'm') //simulate mode //simulate mode sm0 sm1 sm2; 0: cancel simulate mode 1:simulate with the obstacle; 2: simulate with obstacle plus motor
   {
     int val = atoi(buffer + 2);
     setSimulateMode( val );
-  }
-  else if( ch0 == 'a' && ch1 == 't' )
-  {
-    Serial.print( buffer );
-    if( atNLCR == 1 )
-      Serial.print( '\r' );
-    else if( atNLCR == 2 )
-      Serial.print( '\n');
-    else if( atNLCR == 3 )
-      Serial.print( "\r\n" );
-  }
-  else if( ch0 == 'l' && ch1 == 'r')
-  {
-    if( bufferLen == 2 )
-    {
-      Serial.print(" at NLCR mode:");
-      Serial.println( atNLCR );
-    }
-    else
-      atNLCR = (*(buffer+2) - '0');
+    return;
   }
 
-  else
+  if (ch0 == 's' && ch1 == 't') //stop
   {
+    stopRobot();
+    return;
+  }
+
+  if( ch0 == 'r' && ch1 == 's') //reset robot
+  {
+    resetRobot();
+    resetController();
+
+    return;
+  }
+
+  if (ch0 == 'g' && ch1 == 'g') //set goto goal goal
+  {
+      int ival;
+      double _x, _y, _v;
+      int angle;
+      ival = atoi((buffer+2));
+      _x = (float)ival/10.0;
+      char *buf = strchr(buffer, ',');
+      ival = atoi((buf+1));
+      _y = (float)ival/10.0;
+      
+      buf = strchr((buf + 1), ',');
+      angle = atoi(buf + 1);
+      
+      buf = strchr((buf + 1), ',');
+      ival = atoi((buf+1));
+      _v = (float)ival/100.0;
+      double _theta;
+      if (angle <= 180)
+        _theta = (angle * PI) / 180.0;
+      else
+      {
+        angle = angle - 360;
+        _theta = (angle * PI) / 180.0;
+      }
+
+    Serial.print("_gg:");
+    Serial.print(_x);
+    Serial.print(',');
+    Serial.println(_y);
+
+    setGTGGoal(_x, _y, _theta, _v);
+    return;
+
+  }
+  if( ch0 == 'g' && ch1 == 'o') //start goto goal
+  {
+    startGTG();
+    return;
+  }  
+
+  if (ch0 == 't' && ch1 == 'l') //turn around left/ right(-pwm) test tl0/1/2,360; tl dir, angle;
+  {
+    int dir = atoi(buffer + 2);
+    int angle = 360;
+    char *buf = strchr(buffer, ',');
+    if (buf != NULL)
+      angle = atof(buf + 1);
+
+    turnAround(dir, angle);
+    return;
+  }
+
      Serial.print("Na:");
      Serial.println(buffer );
-  }
 }
 
 
@@ -188,27 +241,34 @@ void setPID(char *buffer)
   i = atof((buf + 1));
   buf = strchr((buf + 1), ',');
   d = atof(buf + 1);
- 
-  SendMessages("Set PID:%d,%d,%d,%d\n",
-    type, 
-    (int)100*p,
-    (int)1000*i,
-    (int)10000*d
-  );
+  //  SendMessages("PID:%d,%d,%d,%d\n",
+  //   type, 
+  //   (int)100*p,
+  //   (int)1000*i,
+  //   (int)10000*d
+  // );
 
-    if( type == 1 )
-    {
-        d_kp = p;
-        d_ki = i;
-        d_kd = d;
-    }
-    else if( type == 4 )
-    {
-        v_kp = p;
-        v_ki = i;
-        v_kd = d;
-    }
+  Serial.print("_PID:");
+  Serial.print(type);
+  Serial.print(',');
+  Serial.print(p);
+  Serial.print(',');
+  Serial.print(i);
+  Serial.print(',');
+  Serial.println(d);
 
+  if( type == 1 )
+  {
+    d_kp = p;
+    d_ki = i;
+    d_kd = d;
+  }
+  else if( type == 4 )
+  {
+    v_kp = p;
+    v_ki = i;
+    v_kd = d;
+  }
 }
 
 
@@ -228,7 +288,7 @@ void motorSpeed(int pwml, int pwmr)
   int ic1 = (int) (count1 - c1);
   int ic2 = (int) (count2 - c2);
   int lt1 = (int)lt;
-  SendMessages("%d,%d,%d,%d\n", pwml, lt1, ic1, ic2);
+  SendMessages("%d,%d,%d,%d,%d\n", pwml, pwmr, lt1, ic1, ic2);
 }
 
 
@@ -309,13 +369,13 @@ void SendRobotStateValue()
 
 void SendMessages(const char *format, ...)
 {
-  char tmp[60];
-  memset(tmp, 0, 60);
+  char tmp[50];
+  memset(tmp, 0, 50);
   
   va_list vArgList;
   va_start(vArgList, format);
   // vsniprintf(tmp, 20, format, vArgList);
-  vsnprintf(tmp, 59, format, vArgList);
+  vsnprintf(tmp, 50, format, vArgList);
   va_end(vArgList);
   int len = strlen(tmp);
   if( !mBleConnected )  //return
@@ -394,7 +454,7 @@ void setSimulateMode( int val )
 
     if( val == 0 )
     {
-      Serial.println("Close simulate mode!");
+      Serial.println("close sm mode!");
       prev_left_ticks = readLeftEncoder();
       prev_right_ticks = readRightEncoder();          
       simulateMode = false;
@@ -415,12 +475,12 @@ void setSimulateMode( int val )
 //BLE分包，待发送数据队列实现
 // uint8_t queueLen = 0;
 // bool queueIdle = true; 
-char dataBuf[4][20];
-uint8_t dataLens[4];
+char dataBuf[3][20];
+uint8_t dataLens[3];
 
 int addData(char *buf, uint8_t len )
 {
-  if( queueLen > 3 )
+  if( queueLen > 2 )
     return -1; //full
 
   memset(dataBuf[queueLen], 0, 20);
